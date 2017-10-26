@@ -59,6 +59,9 @@ class EmailDelivery(object):
             aws_username = self.get_aws_username_from_event(event)
             if aws_username:
                 return self.ldap_lookup.get_email_to_addrs_from_uid(aws_username)
+        elif 'event-owner' in targets:
+            event_email = self.get_aws_username_from_event_saml(event)
+            return [] if event_email == None else [event_email]
         return []
 
     def get_ldap_emails_from_resource(self, sqs_message, resource):
@@ -241,3 +244,28 @@ class EmailDelivery(object):
         else:
             user_id = identity['principalId']
         return user_id
+
+    # https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-event-reference-user-identity.html
+    def get_aws_username_from_event_saml(self, event):
+        if event is None:
+            return None
+        identity = event.get('detail', {}).get('userIdentity', {})
+        if not identity:
+            self.logger.warning("Could not get recipient from event \n %s" % (
+                format_struct(event)))
+            return None
+        if identity['type'] == 'AssumedRole':
+            user_id = None
+            if ':' in identity['principalId']:
+                user_id = identity['principalId'].split(':', 1)[-1]
+            else:
+                user_id = identity['principalId']
+            return user_id
+        if identity['type'] == 'IAMUser' or identity['type'] == 'WebIdentityUser':
+            return None
+        if identity['type'] == 'Root':
+            return None
+        # this conditional is left here as a last resort, it should
+        # be better documented with an example UserIdentity json
+        self.logger.error("Fell through")
+        return None
